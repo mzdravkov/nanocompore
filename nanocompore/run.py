@@ -417,6 +417,7 @@ class Worker(multiprocessing.Process):
                                     "Saving the transcript as processed.")
                         self._db_manager.save_transcript(transcript)
                     continue
+
                 prepared_data = self._prepare_data(data, samples, conditions)
                 data, samples, conditions, positions = prepared_data
                 data, positions = self._filter_low_cov_positions(data, positions, conditions)
@@ -646,6 +647,8 @@ class Uncalled4Worker(Worker):
         invalid_ratios = get_reads_invalid_ratio(data[:, :, INTENSITY_POS])
         valid_reads = invalid_ratios < self._conf.get_max_invalid_kmers_freq()
 
+        logger.debug(f"Filtering uncalled4 reads in read_data: valid {valid_reads.sum()} out of {valid_reads.shape[0]}")
+
         return data[:, valid_reads], samples[valid_reads], conditions[valid_reads]
 
 
@@ -773,7 +776,12 @@ class GenericWorker(Worker):
         condition_id_mapper = np.vectorize(self._conf.get_condition_ids().get)
         condition_ids = condition_id_mapper(condition_labels)
 
-        return tensor, sample_ids, condition_ids
+        invalid_ratios = get_reads_invalid_ratio(tensor[:, :, INTENSITY_POS])
+        valid_reads = invalid_ratios < self._conf.get_max_invalid_kmers_freq()
+
+        logger.debug(f"Filtering db reads in read_data: valid {valid_reads.sum()} out of {valid_reads.shape[0]}")
+
+        return tensor[:, valid_reads], sample_ids[valid_reads], condition_ids[valid_reads]
 
 
     def close(self):

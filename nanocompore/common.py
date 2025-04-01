@@ -307,12 +307,14 @@ def get_reads_invalid_ratio(intensity: Float[np.ndarray, "positions reads"]):
         the ratio of invalid positions for
         each read.
     """
-    nreads = intensity.shape[1]
-    ratios = np.empty(nreads)
-    for n in range(nreads):
-        valid_positions = np.where(~np.isnan(intensity[:, n]))[0]
-        length = valid_positions.max() - valid_positions.min() + 1
-        invalid_ratio = (length - len(valid_positions))/length
-        ratios[n] = invalid_ratio
-    return ratios
+    # nreads = intensity.shape[1]
+    # ratios = np.empty(nreads)
+    # for n in range(nreads):
+    #     valid_positions = np.where(~np.isnan(intensity[:, n]))[0]
+    #     length = valid_positions.max() - valid_positions.min() + 1
+    #     invalid_ratio = (length - len(valid_positions))/length
+    #     ratios[n] = invalid_ratio
+    # return ratios
+    length = intensity.shape[0]
+    return np.isnan(intensity).sum(0) / length
 
