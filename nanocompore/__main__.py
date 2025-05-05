@@ -10,6 +10,7 @@ from loguru import logger
 
 from nanocompore import __version__ as package_version
 from nanocompore import __description__ as package_description
+from nanocompore import plotting
 from nanocompore.run import RunCmd
 from nanocompore.preprocessing import RemoraPreprocessor
 from nanocompore.eventalign_collapse import EventalignCollapser
@@ -29,7 +30,8 @@ def main(args=None):
             \t* template : Initialize a new input configuration file using the default template.
             \t* eventalign_collapse : Parse eventalign data to process and store it to an intermediary efficient database for later analysis.\n
             \t* remora_resquiggle : Use Remora to resquiggle a sample and create an SQLite DB with the signal measurements.\n
-            \t* run : Compare 2 samples and find significant signal differences.\n""")
+            \t* run : Compare 2 samples and find significant signal differences.\n
+            \t* plot : Plotting functionality\n""")
     subparsers = parser.add_subparsers(dest='subcommand',
                                        required=True,
                                        description=subparser_description)
@@ -72,6 +74,21 @@ def main(args=None):
     parser_init.add_argument('--overwrite', '-o', action='store_true', help="Overwrite existing config file.")
     parser_init.add_argument('path', type=str)
     parser_init.set_defaults(func=init_subcommand)
+
+    parser_plot = subparsers.add_parser('plot',
+                                        formatter_class=argparse.RawDescriptionHelpFormatter,
+                                        description=textwrap.dedent("Plotting functionality."))
+    plot_subparsers = parser_plot.add_subparsers(help='Plot type.')
+
+    parser_gmm = plot_subparsers.add_parser("gmm",
+                                            formatter_class=argparse.RawDescriptionHelpFormatter,
+                                            description=textwrap.dedent("Plot the GMM fitting for a single position."))
+    # parser_plot.add_argument('--type', '-t', type=str, help="Type of plot to draw. Available options are: gmm")
+    parser_gmm.add_argument('--config', '-c', type=str, required=True, help="Path to the input configuration YAML file.")
+    parser_gmm.add_argument('--output', '-o', type=str, required=True, help="Path and filename where the plot will be saved.")
+    parser_gmm.add_argument('reference', type=str, help="Reference name, matching a name from the FASTA reference used in the config.")
+    parser_gmm.add_argument('position', type=str, help="0-based index on the reference.")
+    parser_gmm.set_defaults(func=plot_gmm)
 
     # Parse agrs and
     args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
@@ -148,6 +165,30 @@ def init_subcommand(args):
     if os.path.isfile(args.path) and not args.overwrite:
         raise NanocomporeError("Output file already exists. Use --overwrite to overwrite it.")
     shutil.copyfile(template, args.path)
+
+
+def plot_gmm(args: argparse.Namespace):
+    """
+    Plot GMM.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command-line arguments
+    """
+    # Read the input config file
+    with open(args.config, 'r') as f:
+        config_file = yaml.safe_load(f)
+
+    try:
+        config = Config(config_file)
+    except Exception as e:
+        msg = f"ERROR: {e}\n"
+        sys.stderr.write(msg)
+        exit(1)
+
+    fig = plotting.plot_gmm(args, config)
+    fig.savefig(args.output)
 
 
 def setup_logger(config, file_name):
