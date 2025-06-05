@@ -436,6 +436,7 @@ class Worker(multiprocessing.Process):
 
                 prepared_data = self._prepare_data(data, samples, conditions)
                 data, samples, conditions, positions = prepared_data
+                data = self.scale_data(data)
                 min_cov = self._conf.get_min_coverage()
                 data, positions = self._filter_low_cov_positions(data, positions, conditions, min_cov)
                 max_reads = self._conf.get_downsample_high_coverage()
@@ -599,6 +600,15 @@ class Worker(multiprocessing.Process):
                                  device=self._device)[valid_positions]
 
         return (tensor, samples, conditions, positions)
+
+
+    def scale_data(
+            self,
+            data: Float[torch.Tensor, "positions reads vars"]
+    ) -> Float[torch.Tensor, "positions reads vars"]:
+        pos_medians = torch.nanmedian(data, 1).values
+        median_diffs = (data - pos_medians.unsqueeze(1)).nanmedian(0).values
+        return data - median_diffs
 
 
     def setup(self):
