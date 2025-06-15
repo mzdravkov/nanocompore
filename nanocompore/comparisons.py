@@ -46,7 +46,9 @@ class TranscriptComparator:
         conditions: Int[torch.Tensor, "reads"],
         positions: Int[torch.Tensor, "positions"],
         device: str
-    ) -> tuple[Transcript, Union[pd.DataFrame, None]]:
+    ) -> tuple[Transcript,
+               Union[pd.DataFrame, None],
+               Union[Float[torch.Tensor, "positions reads"], None]]:
         """
         Compare the two conditions for the given transcript.
 
@@ -72,13 +74,17 @@ class TranscriptComparator:
 
         Returns
         -------
-        tuple[Transcript, pd.DataFrame]
-            Tuple with the Transcript and the comparison
-            results stored in a pandas DataFrame.
+        tuple[Transcript,
+              Union[pd.DataFrame, None]
+              Union[Float[torch.Tensor, "positions reads"], None],
+            The results is a tuple with:
+            - Transcript instance.
+            - Comparison results stored in a pandas DataFrame.
+            - Read level modification probability for all positions.
         """
         n_positions = len(positions)
         if n_positions == 0:
-            return (transcript, None)
+            return (transcript, None, None)
 
         results = pd.DataFrame({'transcript_id': transcript.id,
                                 'pos': positions.cpu()})
@@ -125,6 +131,7 @@ class TranscriptComparator:
             auto_test_mask = self._auto_test_mask(data)
         test_masks = self._get_test_masks(auto_test_mask, n_positions)
 
+        read_results = None
         for test, mask in test_masks.items():
             self._worker.log("debug", f"Start {test}")
             t = time.time()
@@ -133,6 +140,8 @@ class TranscriptComparator:
                                           samples,
                                           conditions,
                                           device=device)
+            if isinstance(test_results, tuple):
+                test_results, read_results = test_results
             self._worker.log("debug", f"Finished {test} ({time.time() - t})")
             self._merge_results(results, test_results, test, mask, auto_test_mask, n_positions)
 
@@ -145,7 +154,7 @@ class TranscriptComparator:
                 label = f"{test}_context_{context}"
                 results[label] = combined_pvals
 
-        return transcript, results
+        return transcript, results, read_results
 
 
     def _get_test_masks(self, auto_test_mask, n_positions):
@@ -365,6 +374,15 @@ class TranscriptComparator:
             torch.cuda.reset_peak_memory_stats()
 
         contingencies = get_contingency_matrices(conditions, pred).to(device=device)
+        mod_clusters = self._get_mod_cluster(contingencies)
+
+        B, N = pred.shape
+        read_mod_probs = torch.gather(
+                cluster_probs,
+                2,
+                mod_clusters[:, None, None].expand((B, N, 1))
+            ).squeeze(2)
+
         if self._config.get_cluster_counts() == HARD_ASSIGNMENT:
             counts = self._get_cluster_counts(contingencies, samples, pred)
         elif self._config.get_cluster_counts() == SOFT_ASSIGNMENT:
@@ -388,8 +406,9 @@ class TranscriptComparator:
         lors[ignored_tests] = np.nan
         pvals[ignored_tests] = np.nan
 
-        return {'GMM_chi2_pvalue': pvals,
-                'GMM_LOR': lors.cpu().numpy()} | counts
+        results = {'GMM_chi2_pvalue': pvals,
+                   'GMM_LOR': lors.cpu().numpy()} | counts
+        return results, read_mod_probs
 
 
     def _split_by_ndim(self, test_data):
