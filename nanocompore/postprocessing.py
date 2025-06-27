@@ -192,7 +192,7 @@ class Postprocessor():
         keywords = ['pvalue', 'qvalue', 'LOR', 'GMM', 'logit', 'auto_test', '_mod', '_unmod']
         selected =  [col
                      for col in columns
-                     if any(kw in col for kw in keywords)]
+                     if any(kw in col for kw in keywords) and 'GMM_params' not in col]
         return self._sort_headers_list(selected)
 
 

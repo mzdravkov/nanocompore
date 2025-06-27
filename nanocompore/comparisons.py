@@ -1,5 +1,7 @@
 import gc
 import time
+import pickle
+import sqlite3
 from collections import defaultdict
 from typing import Dict, Union
 
@@ -209,6 +211,8 @@ class TranscriptComparator:
             results['auto_test'] = auto_test_mask
 
         for column, values in test_results.items():
+            if column == 'GMM_params':
+                values = np.array(values, dtype=object)
             results.loc[mask, column] = values
             if has_auto and column == self._auto_test_pvalue(test):
                 rows = auto_test_mask == test
@@ -347,7 +351,6 @@ class TranscriptComparator:
             return gmm
         gmm1 = self.retry(lambda: fit_model(1), exception=torch.OutOfMemoryError)
         bic1 = gmm1.bic(test_data)
-        del gmm1
         gc.collect()
         gmm2 = self.retry(lambda: fit_model(2), exception=torch.OutOfMemoryError)
 
@@ -358,13 +361,18 @@ class TranscriptComparator:
                            cluster_probs.argmax(2))
 
         bic2 = gmm2.bic(test_data)
-        del gmm2
+
         gc.collect()
         if device.startswith('cuda'):
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats()
 
         contingencies = get_contingency_matrices(conditions, pred).to(device=device)
+
+        gmm_params = self._gmm_params(gmm1, gmm2, bic1, bic2, contingencies)
+        del gmm1
+        del gmm2
+
         if self._config.get_cluster_counts() == HARD_ASSIGNMENT:
             counts = self._get_cluster_counts(contingencies, samples, pred)
         elif self._config.get_cluster_counts() == SOFT_ASSIGNMENT:
@@ -388,8 +396,31 @@ class TranscriptComparator:
         lors[ignored_tests] = np.nan
         pvals[ignored_tests] = np.nan
 
+
         return {'GMM_chi2_pvalue': pvals,
-                'GMM_LOR': lors.cpu().numpy()} | counts
+                'GMM_LOR': lors.cpu().numpy(),
+                'GMM_components': torch.where(bic2 < bic1, 2, 1).numpy(),
+                'GMM_params': gmm_params} | counts
+
+
+    def _gmm_params(self, gmm1, gmm2, bic1, bic2, contingencies):
+        use_2_clusts = bic2 < bic1
+        mod_clusters = self._get_mod_cluster(contingencies)
+
+        gmm_params = np.empty(bic1.shape, dtype=object)
+
+        for pos, (two_clusts, mod_clust) in enumerate(zip(use_2_clusts, mod_clusters)):
+            if two_clusts:
+                params = ((gmm2.means[1 - mod_clust][pos].tolist(),
+                           gmm2.covs[1 - mod_clust][pos].tolist()),
+                          (gmm2.means[mod_clust][pos].tolist(),
+                           gmm2.covs[mod_clust][pos].tolist()))
+            else:
+                params = ((gmm2.means[1 - mod_clust][pos].tolist(),
+                           gmm2.covs[1 - mod_clust][pos].tolist()),
+                          None)
+            gmm_params[pos] = sqlite3.Binary(pickle.dumps(params))
+        return gmm_params
 
 
     def _split_by_ndim(self, test_data):
